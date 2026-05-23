@@ -1,3 +1,4 @@
+#cat > /home/claude/album-ripper/.github/workflows/download.yml << 'EOF'
 name: Download Album
 
 on:
@@ -25,11 +26,22 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install ffmpeg
         run: sudo apt-get install -y ffmpeg
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Install yt-dlp PO token plugin
+        run: |
+          pip install yt-dlp[default]
+          pip install "yt-dlp-get-pot>=0.3.3"
+          npm install -g bgutil-ytdlp-pot-provider
 
       - name: Write YouTube cookies
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
