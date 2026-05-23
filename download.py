@@ -167,14 +167,17 @@ def get_lyrics(artist, title, wiki_length=None):
         return None, False
 
 
-# ---- SoundCloud search + download (no auth needed) ----
+# ---- YouTube search + download with cookies ----
 
-def search_soundcloud_track(artist, title):
+def search_youtube_track(artist, title, cookies_file=None):
     clean_title = re.sub(r'\(feat.*?\)|\(featuring.*?\)', '', title, flags=re.IGNORECASE).strip()
-    query = f"{artist} {clean_title}"
+    query = f"{artist} {clean_title} official audio"
+    opts = {"quiet": True, "extract_flat": True}
+    if cookies_file and os.path.exists(cookies_file):
+        opts["cookiefile"] = cookies_file
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as ydl:
-            results = ydl.extract_info(f"scsearch5:{query}", download=False)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            results = ydl.extract_info(f"ytsearch5:{query}", download=False)
         entries = results.get("entries", [])
         for e in entries:
             t = e.get("title", "").lower()
@@ -183,15 +186,15 @@ def search_soundcloud_track(artist, title):
                 continue
             if dur > 600:
                 continue
-            return e.get("url") or e.get("webpage_url")
+            return f"https://www.youtube.com/watch?v={e['id']}"
         if entries:
-            return entries[0].get("url") or entries[0].get("webpage_url")
+            return f"https://www.youtube.com/watch?v={entries[0]['id']}"
     except Exception as e:
-        print(f"  SoundCloud search error: {e}")
+        print(f"  Search error: {e}")
     return None
 
 
-def download_track(url, out_dir, track_num, title):
+def download_track(url, out_dir, track_num, title, cookies_file=None):
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
     fname = f"{track_num:02d} - {safe_title}"
     opts = {
@@ -205,6 +208,8 @@ def download_track(url, out_dir, track_num, title):
         "quiet": True,
         "noplaylist": True,
     }
+    if cookies_file and os.path.exists(cookies_file):
+        opts["cookiefile"] = cookies_file
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
     return f"{fname}.mp3"
@@ -247,12 +252,19 @@ def main():
     parser.add_argument("--artist", required=True)
     parser.add_argument("--album", required=True)
     parser.add_argument("--output", default="output")
+    parser.add_argument("--cookies", default="cookies.txt", help="Path to YouTube cookies.txt")
     args = parser.parse_args()
 
     artist = args.artist
     album = args.album
+    cookies_file = args.cookies
     output_dir = os.path.join(args.output, f"{artist} - {album}")
     os.makedirs(output_dir, exist_ok=True)
+
+    if os.path.exists(cookies_file):
+        print(f"  Using cookies: {cookies_file}")
+    else:
+        print("  ⚠ No cookies file found — YouTube may block downloads")
 
     print(f"\nFetching tracklist for {artist} - {album}...")
     wiki_tracks, wiki_url, tracklist_data = get_wiki_tracklist(artist, album, output_dir)
@@ -276,15 +288,15 @@ def main():
         wiki_length = track["length"]
         print(f"[{i}/{len(tracklist_data)}] {title}")
 
-        sc_url = search_soundcloud_track(artist, title)
-        if not sc_url:
-            print("  ✗ No SoundCloud result")
+        yt_url = search_youtube_track(artist, title, cookies_file)
+        if not yt_url:
+            print("  ✗ No YouTube result")
             failed.append(title)
             continue
 
-        print(f"  → {sc_url}")
+        print(f"  → {yt_url}")
         try:
-            fname = download_track(sc_url, output_dir, i, title)
+            fname = download_track(yt_url, output_dir, i, title, cookies_file)
             fpath = os.path.join(output_dir, fname)
             lyrics, synced = get_lyrics(artist, title, wiki_length)
             tag_mp3(fpath, title, artist, album, i, art_bytes, lyrics)
