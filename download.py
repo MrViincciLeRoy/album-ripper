@@ -1,3 +1,4 @@
+#cat > /home/claude/album-ripper/download.py << 'PYEOF'
 import os
 import re
 import json
@@ -167,14 +168,30 @@ def get_lyrics(artist, title, wiki_length=None):
         return None, False
 
 
-# ---- YouTube search + download with cookies ----
+# ---- YouTube search + download ----
+
+def build_ydl_opts(cookies_file=None, extra=None):
+    opts = {
+        "quiet": True,
+        "no_warnings": False,
+        # Use the bgutil PO token provider plugin (installed via npm)
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["web"],
+            }
+        },
+    }
+    if cookies_file and os.path.exists(cookies_file):
+        opts["cookiefile"] = cookies_file
+    if extra:
+        opts.update(extra)
+    return opts
+
 
 def search_youtube_track(artist, title, cookies_file=None):
     clean_title = re.sub(r'\(feat.*?\)|\(featuring.*?\)', '', title, flags=re.IGNORECASE).strip()
     query = f"{artist} {clean_title} official audio"
-    opts = {"quiet": True, "extract_flat": True}
-    if cookies_file and os.path.exists(cookies_file):
-        opts["cookiefile"] = cookies_file
+    opts = build_ydl_opts(cookies_file, {"extract_flat": True})
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch5:{query}", download=False)
@@ -197,7 +214,7 @@ def search_youtube_track(artist, title, cookies_file=None):
 def download_track(url, out_dir, track_num, title, cookies_file=None):
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
     fname = f"{track_num:02d} - {safe_title}"
-    opts = {
+    opts = build_ydl_opts(cookies_file, {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(out_dir, f"{fname}.%(ext)s"),
         "postprocessors": [{
@@ -205,11 +222,8 @@ def download_track(url, out_dir, track_num, title, cookies_file=None):
             "preferredcodec": "mp3",
             "preferredquality": "192",
         }],
-        "quiet": True,
         "noplaylist": True,
-    }
-    if cookies_file and os.path.exists(cookies_file):
-        opts["cookiefile"] = cookies_file
+    })
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([url])
     return f"{fname}.mp3"
@@ -252,7 +266,7 @@ def main():
     parser.add_argument("--artist", required=True)
     parser.add_argument("--album", required=True)
     parser.add_argument("--output", default="output")
-    parser.add_argument("--cookies", default="cookies.txt", help="Path to YouTube cookies.txt")
+    parser.add_argument("--cookies", default="cookies.txt")
     args = parser.parse_args()
 
     artist = args.artist
@@ -264,7 +278,7 @@ def main():
     if os.path.exists(cookies_file):
         print(f"  Using cookies: {cookies_file}")
     else:
-        print("  ⚠ No cookies file found — YouTube may block downloads")
+        print("  ⚠ No cookies file — YouTube may block downloads")
 
     print(f"\nFetching tracklist for {artist} - {album}...")
     wiki_tracks, wiki_url, tracklist_data = get_wiki_tracklist(artist, album, output_dir)
@@ -334,3 +348,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
