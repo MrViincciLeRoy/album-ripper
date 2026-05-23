@@ -1,4 +1,3 @@
-#cat > /home/claude/album-ripper/download.py << 'PYEOF'
 import os
 import re
 import json
@@ -15,8 +14,6 @@ SESSION.headers.update({
     "Accept-Language": "en-US,en;q=0.9",
 })
 
-
-# ---- Wikipedia ----
 
 def find_wiki_url(artist, album):
     params = {
@@ -92,8 +89,6 @@ def get_wiki_tracklist(artist, album, output_dir):
     return [t["title"] for t in tracks], url, tracks
 
 
-# ---- Album art ----
-
 def get_album_art(artist, album):
     try:
         url = f"https://itunes.apple.com/search?term={requests.utils.quote(artist + ' ' + album)}&entity=album&limit=1"
@@ -106,8 +101,6 @@ def get_album_art(artist, album):
         print(f"  Art error: {e}")
         return None
 
-
-# ---- Lyrics from lrclib ----
 
 def wiki_length_to_seconds(length_str):
     if not length_str:
@@ -168,16 +161,13 @@ def get_lyrics(artist, title, wiki_length=None):
         return None, False
 
 
-# ---- YouTube search + download ----
-
 def build_ydl_opts(cookies_file=None, extra=None):
     opts = {
         "quiet": True,
         "no_warnings": False,
-        # Use the bgutil PO token provider plugin (installed via npm)
         "extractor_args": {
             "youtube": {
-                "player_client": ["web"],
+                "player_client": ["ios", "mweb", "android"],
             }
         },
     }
@@ -229,8 +219,6 @@ def download_track(url, out_dir, track_num, title, cookies_file=None):
     return f"{fname}.mp3"
 
 
-# ---- Tag MP3 ----
-
 def tag_mp3(filepath, title, artist, album, track_num, art_bytes, lyrics):
     try:
         tags = ID3(filepath)
@@ -247,8 +235,6 @@ def tag_mp3(filepath, title, artist, album, track_num, art_bytes, lyrics):
     tags.save(filepath, v2_version=3)
 
 
-# ---- Zip ----
-
 def zip_output(output_dir, artist, album):
     safe_name = re.sub(r'[\\/*?:"<>|]', "", f"{artist} - {album}")
     zip_path = f"{output_dir}.zip"
@@ -258,8 +244,6 @@ def zip_output(output_dir, artist, album):
             zf.write(fpath, arcname=os.path.join(safe_name, fname))
     return zip_path
 
-
-# ---- Main ----
 
 def main():
     parser = argparse.ArgumentParser(description="Album downloader")
@@ -348,4 +332,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
