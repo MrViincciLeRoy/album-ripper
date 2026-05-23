@@ -1,0 +1,50 @@
+name: Download Album
+
+on:
+  workflow_dispatch:
+    inputs:
+      artist:
+        description: "Artist name"
+        required: true
+        default: "Kendrick Lamar"
+      album:
+        description: "Album name"
+        required: true
+        default: "DAMN."
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run downloader
+        run: |
+          python download.py \
+            --artist "${{ github.event.inputs.artist }}" \
+            --album "${{ github.event.inputs.album }}" \
+            --output output
+
+      - name: Read zip path
+        id: zip
+        run: echo "zip_path=$(cat zip_path.txt)" >> $GITHUB_OUTPUT
+
+      - name: Upload zip as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ github.event.inputs.artist }} - ${{ github.event.inputs.album }}"
+          path: ${{ steps.zip.outputs.zip_path }}
+          retention-days: 7
