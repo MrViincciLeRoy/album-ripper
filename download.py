@@ -167,14 +167,14 @@ def get_lyrics(artist, title, wiki_length=None):
         return None, False
 
 
-# ---- YouTube ----
+# ---- SoundCloud search + download (no auth needed) ----
 
-def search_youtube_track(artist, title):
+def search_soundcloud_track(artist, title):
     clean_title = re.sub(r'\(feat.*?\)|\(featuring.*?\)', '', title, flags=re.IGNORECASE).strip()
-    query = f"{artist} {clean_title} official audio"
+    query = f"{artist} {clean_title}"
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as ydl:
-            results = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            results = ydl.extract_info(f"scsearch5:{query}", download=False)
         entries = results.get("entries", [])
         for e in entries:
             t = e.get("title", "").lower()
@@ -183,11 +183,11 @@ def search_youtube_track(artist, title):
                 continue
             if dur > 600:
                 continue
-            return f"https://www.youtube.com/watch?v={e['id']}"
+            return e.get("url") or e.get("webpage_url")
         if entries:
-            return f"https://www.youtube.com/watch?v={entries[0]['id']}"
+            return entries[0].get("url") or entries[0].get("webpage_url")
     except Exception as e:
-        print(f"  Search error: {e}")
+        print(f"  SoundCloud search error: {e}")
     return None
 
 
@@ -210,7 +210,7 @@ def download_track(url, out_dir, track_num, title):
     return f"{fname}.mp3"
 
 
-# ---- Tag MP3 (lyrics embedded) ----
+# ---- Tag MP3 ----
 
 def tag_mp3(filepath, title, artist, album, track_num, art_bytes, lyrics):
     try:
@@ -224,7 +224,6 @@ def tag_mp3(filepath, title, artist, album, track_num, art_bytes, lyrics):
     if art_bytes:
         tags[APIC] = APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=art_bytes)
     if lyrics:
-        # Embed lyrics into the MP3 ID3 tag (USLT = unsynchronised lyrics frame)
         tags[USLT] = USLT(encoding=3, lang="eng", desc="", text=lyrics)
     tags.save(filepath, v2_version=3)
 
@@ -277,15 +276,15 @@ def main():
         wiki_length = track["length"]
         print(f"[{i}/{len(tracklist_data)}] {title}")
 
-        yt_url = search_youtube_track(artist, title)
-        if not yt_url:
-            print("  ✗ No YouTube result")
+        sc_url = search_soundcloud_track(artist, title)
+        if not sc_url:
+            print("  ✗ No SoundCloud result")
             failed.append(title)
             continue
 
-        print(f"  → {yt_url}")
+        print(f"  → {sc_url}")
         try:
-            fname = download_track(yt_url, output_dir, i, title)
+            fname = download_track(sc_url, output_dir, i, title)
             fpath = os.path.join(output_dir, fname)
             lyrics, synced = get_lyrics(artist, title, wiki_length)
             tag_mp3(fpath, title, artist, album, i, art_bytes, lyrics)
@@ -317,7 +316,6 @@ def main():
         print("  All tracks downloaded successfully.")
     print(f"\n  Zip: {zip_path}")
 
-    # Write zip path to file so GitHub Actions can pick it up
     with open("zip_path.txt", "w") as f:
         f.write(zip_path)
 
