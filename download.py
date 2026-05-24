@@ -162,12 +162,14 @@ def get_lyrics(artist, title, wiki_length=None):
 
 
 def build_ydl_opts(cookies_file=None, extra=None):
+    # tv_embedded: supports cookies, no PO token required, bypasses most restrictions
+    # web_creator: fallback that also avoids PO token requirement
     opts = {
         "quiet": True,
         "no_warnings": False,
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "mweb", "android"],
+                "player_client": ["tv_embedded", "web_creator"],
             }
         },
     }
