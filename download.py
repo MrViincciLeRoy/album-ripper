@@ -2,11 +2,12 @@ import os
 import re
 import json
 import zipfile
+import shutil
 import argparse
+import subprocess
 import requests
 from bs4 import BeautifulSoup
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, APIC, USLT, error as ID3Error
-import yt_dlp
 
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -65,21 +66,12 @@ def get_wiki_tracklist(artist, album, output_dir):
             if not title or re.match(r'^\d+:\d+', title):
                 continue
 
-            writers = [li.get_text(strip=True) for li in cells[1].find_all("li")] if len(cells) > 1 else []
-            producers = []
-            if len(cells) > 2:
-                producers = [li.get_text(strip=True) for li in cells[2].find_all("li")]
-                if not producers:
-                    producers = [cells[2].get_text(strip=True)]
-
             length_cell = row.find("td", class_="tracklist-length")
             length = length_cell.get_text(strip=True) if length_cell else None
 
             tracks.append({
                 "track_no": track_no,
                 "title": title,
-                "writers": writers,
-                "producers": producers,
                 "length": length,
             })
 
@@ -161,63 +153,38 @@ def get_lyrics(artist, title, wiki_length=None):
         return None, False
 
 
-# No cookies passed to yt-dlp — cookies enroll the account in YouTube's SABR
-# experiment which breaks web/web_creator, and also cause ios/android to be
-# skipped. Anonymous ios+android bypass all of that cleanly.
-def build_ydl_opts(extra=None):
-    opts = {
-        "quiet": True,
-        "no_warnings": False,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "android"],
-            }
-        },
-    }
-    if extra:
-        opts.update(extra)
-    return opts
-
-
-def search_youtube_track(artist, title):
-    clean_title = re.sub(r'\(feat.*?\)|\(featuring.*?\)', '', title, flags=re.IGNORECASE).strip()
-    query = f"{artist} {clean_title} official audio"
-    opts = build_ydl_opts({"extract_flat": True})
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            results = ydl.extract_info(f"ytsearch5:{query}", download=False)
-        entries = results.get("entries", [])
-        for e in entries:
-            t = e.get("title", "").lower()
-            dur = e.get("duration") or 0
-            if any(x in t for x in ["full album", "mix", "playlist", "432hz", "slowed", "reverb"]):
-                continue
-            if dur > 600:
-                continue
-            return f"https://www.youtube.com/watch?v={e['id']}"
-        if entries:
-            return f"https://www.youtube.com/watch?v={entries[0]['id']}"
-    except Exception as e:
-        print(f"  Search error: {e}")
-    return None
-
-
-def download_track(url, out_dir, track_num, title):
+def download_track(artist, title, out_dir, track_num):
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
-    fname = f"{track_num:02d} - {safe_title}"
-    opts = build_ydl_opts({
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(out_dir, f"{fname}.%(ext)s"),
-        "postprocessors": [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }],
-        "noplaylist": True,
-    })
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
-    return f"{fname}.mp3"
+    target_name = f"{track_num:02d} - {safe_title}.mp3"
+
+    # spotdl downloads to a temp subdir so we can reliably find what it created
+    tmp_dir = os.path.join(out_dir, f"_tmp_{track_num}")
+    os.makedirs(tmp_dir, exist_ok=True)
+
+    try:
+        result = subprocess.run(
+            [
+                "spotdl", "download", f"{artist} {title}",
+                "--output", tmp_dir,
+                "--format", "mp3",
+                "--bitrate", "192k",
+                "--no-cache",
+            ],
+            capture_output=True, text=True, timeout=180
+        )
+
+        mp3_files = [f for f in os.listdir(tmp_dir) if f.endswith(".mp3")]
+        if not mp3_files:
+            err = result.stderr.strip() or result.stdout.strip()
+            raise Exception(f"spotdl produced no file — {err[:200]}")
+
+        src = os.path.join(tmp_dir, mp3_files[0])
+        dst = os.path.join(out_dir, target_name)
+        shutil.move(src, dst)
+        return target_name
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def tag_mp3(filepath, title, artist, album, track_num, art_bytes, lyrics):
@@ -242,7 +209,8 @@ def zip_output(output_dir, artist, album):
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in os.listdir(output_dir):
             fpath = os.path.join(output_dir, fname)
-            zf.write(fpath, arcname=os.path.join(safe_name, fname))
+            if os.path.isfile(fpath):
+                zf.write(fpath, arcname=os.path.join(safe_name, fname))
     return zip_path
 
 
@@ -251,7 +219,6 @@ def main():
     parser.add_argument("--artist", required=True)
     parser.add_argument("--album", required=True)
     parser.add_argument("--output", default="output")
-    parser.add_argument("--cookies", default="cookies.txt")  # kept for compat, not used
     args = parser.parse_args()
 
     artist = args.artist
@@ -281,15 +248,8 @@ def main():
         wiki_length = track["length"]
         print(f"[{i}/{len(tracklist_data)}] {title}")
 
-        yt_url = search_youtube_track(artist, title)
-        if not yt_url:
-            print("  ✗ No YouTube result")
-            failed.append(title)
-            continue
-
-        print(f"  → {yt_url}")
         try:
-            fname = download_track(yt_url, output_dir, i, title)
+            fname = download_track(artist, title, output_dir, i)
             fpath = os.path.join(output_dir, fname)
             lyrics, synced = get_lyrics(artist, title, wiki_length)
             tag_mp3(fpath, title, artist, album, i, art_bytes, lyrics)
