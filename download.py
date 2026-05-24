@@ -161,29 +161,28 @@ def get_lyrics(artist, title, wiki_length=None):
         return None, False
 
 
-def build_ydl_opts(cookies_file=None, extra=None):
-    # tv_embedded: supports cookies, no PO token required, bypasses most restrictions
-    # web_creator: fallback that also avoids PO token requirement
+# No cookies passed to yt-dlp — cookies enroll the account in YouTube's SABR
+# experiment which breaks web/web_creator, and also cause ios/android to be
+# skipped. Anonymous ios+android bypass all of that cleanly.
+def build_ydl_opts(extra=None):
     opts = {
         "quiet": True,
         "no_warnings": False,
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv_embedded", "web_creator"],
+                "player_client": ["ios", "android"],
             }
         },
     }
-    if cookies_file and os.path.exists(cookies_file):
-        opts["cookiefile"] = cookies_file
     if extra:
         opts.update(extra)
     return opts
 
 
-def search_youtube_track(artist, title, cookies_file=None):
+def search_youtube_track(artist, title):
     clean_title = re.sub(r'\(feat.*?\)|\(featuring.*?\)', '', title, flags=re.IGNORECASE).strip()
     query = f"{artist} {clean_title} official audio"
-    opts = build_ydl_opts(cookies_file, {"extract_flat": True})
+    opts = build_ydl_opts({"extract_flat": True})
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             results = ydl.extract_info(f"ytsearch5:{query}", download=False)
@@ -203,10 +202,10 @@ def search_youtube_track(artist, title, cookies_file=None):
     return None
 
 
-def download_track(url, out_dir, track_num, title, cookies_file=None):
+def download_track(url, out_dir, track_num, title):
     safe_title = re.sub(r'[\\/*?:"<>|]', "", title)
     fname = f"{track_num:02d} - {safe_title}"
-    opts = build_ydl_opts(cookies_file, {
+    opts = build_ydl_opts({
         "format": "bestaudio/best",
         "outtmpl": os.path.join(out_dir, f"{fname}.%(ext)s"),
         "postprocessors": [{
@@ -252,19 +251,13 @@ def main():
     parser.add_argument("--artist", required=True)
     parser.add_argument("--album", required=True)
     parser.add_argument("--output", default="output")
-    parser.add_argument("--cookies", default="cookies.txt")
+    parser.add_argument("--cookies", default="cookies.txt")  # kept for compat, not used
     args = parser.parse_args()
 
     artist = args.artist
     album = args.album
-    cookies_file = args.cookies
     output_dir = os.path.join(args.output, f"{artist} - {album}")
     os.makedirs(output_dir, exist_ok=True)
-
-    if os.path.exists(cookies_file):
-        print(f"  Using cookies: {cookies_file}")
-    else:
-        print("  ⚠ No cookies file — YouTube may block downloads")
 
     print(f"\nFetching tracklist for {artist} - {album}...")
     wiki_tracks, wiki_url, tracklist_data = get_wiki_tracklist(artist, album, output_dir)
@@ -288,7 +281,7 @@ def main():
         wiki_length = track["length"]
         print(f"[{i}/{len(tracklist_data)}] {title}")
 
-        yt_url = search_youtube_track(artist, title, cookies_file)
+        yt_url = search_youtube_track(artist, title)
         if not yt_url:
             print("  ✗ No YouTube result")
             failed.append(title)
@@ -296,7 +289,7 @@ def main():
 
         print(f"  → {yt_url}")
         try:
-            fname = download_track(yt_url, output_dir, i, title, cookies_file)
+            fname = download_track(yt_url, output_dir, i, title)
             fpath = os.path.join(output_dir, fname)
             lyrics, synced = get_lyrics(artist, title, wiki_length)
             tag_mp3(fpath, title, artist, album, i, art_bytes, lyrics)
